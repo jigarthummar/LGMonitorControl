@@ -36,21 +36,44 @@ struct MenuBarView: View {
             Text("Monitor")
                 .font(.system(.callout, design: .rounded).weight(.medium))
                 .foregroundStyle(Color.claudeText)
-            Picker("", selection: Binding(
-                get: { manager.selectedID ?? manager.displays.first?.id ?? "" },
-                set: { newID in
-                    manager.select(newID)
-                    if let c = manager.selectedController { Task { await c.refresh() } }
-                }
-            )) {
-                ForEach(manager.displays) { display in
-                    Text(display.displayName).tag(display.id)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .tint(Color.claudeAccent)
             Spacer()
+            Menu {
+                ForEach(manager.displays) { display in
+                    Button {
+                        manager.select(display.id)
+                        if let c = manager.selectedController {
+                            Task { await c.refresh() }
+                        }
+                    } label: {
+                        if display.id == manager.selectedID {
+                            Label(display.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(display.displayName)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(manager.selectedController?.displayName ?? "—")
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(Color.claudeText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color.claudeSecondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.claudeSurface)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.claudeBorder, lineWidth: 1))
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             Circle()
                 .fill((manager.selectedController?.isReachable ?? false)
                       ? Color.green
@@ -170,45 +193,14 @@ private struct DisplayControlsView: View {
             )
             .disabled(!controller.contrastSupported)
 
-            HStack(spacing: 8) {
-                Button {
-                    controller.toggleMute()
-                } label: {
-                    Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(controller.muted ? Color.claudeAccent : Color.claudeSecondary)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .disabled(!controller.volumeSupported)
-                .help(controller.muted ? "Unmute" : "Mute")
-                ThemedSlider(
-                    title: "Volume",
-                    systemImage: "speaker.wave.2.fill",
-                    value: $controller.volume,
-                    onCommit: { controller.commitVolume() }
-                )
-                .disabled(!controller.volumeSupported)
-            }
-
-            HStack {
-                Text("Input")
-                    .font(.system(.callout, design: .rounded).weight(.medium))
-                    .foregroundStyle(Color.claudeText)
-                Spacer()
-                Picker("", selection: Binding(
-                    get: { controller.currentInput ?? .usbC },
-                    set: { controller.setInput($0) }
-                )) {
-                    ForEach(InputSource.allCases) { source in
-                        Text(source.label).tag(source)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .tint(Color.claudeAccent)
-                .frame(width: 140)
-            }
+            ThemedSlider(
+                title: "Volume",
+                systemImage: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                value: $controller.volume,
+                onCommit: { controller.commitVolume() },
+                iconAction: { controller.toggleMute() }
+            )
+            .disabled(!controller.volumeSupported)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

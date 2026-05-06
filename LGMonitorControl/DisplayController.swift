@@ -2,54 +2,20 @@ import Foundation
 import AppKit
 import Combine
 
-enum InputSource: Int, CaseIterable, Identifiable {
-    // Standard VCP input codes (used for non-LG monitors).
-    case displayPort1 = 15
-    case displayPort2 = 16
-    case hdmi1 = 17
-    case hdmi2 = 18
-    case usbC = 27
-
-    var id: Int { rawValue }
-    var label: String {
-        switch self {
-        case .hdmi1: return "HDMI 1"
-        case .hdmi2: return "HDMI 2"
-        case .displayPort1: return "DisplayPort 1"
-        case .displayPort2: return "DisplayPort 2"
-        case .usbC: return "USB-C"
-        }
-    }
-
-    /// LG monitors use alternate VCP addressing for input switching.
-    var altCode: Int {
-        switch self {
-        case .hdmi1: return 144
-        case .hdmi2: return 145
-        case .displayPort1: return 208
-        case .displayPort2: return 209
-        case .usbC: return 210
-        }
-    }
-}
-
 @MainActor
 final class DisplayController: ObservableObject, Identifiable {
     let id: String                  // display UUID
     let displayName: String
     let manufacturer: String
-    let useAltInput: Bool
 
     @Published var brightness: Double = 50
     @Published var contrast: Double = 50
     @Published var volume: Double = 50
     @Published var muted: Bool = false
-    @Published var currentInput: InputSource? = nil
 
     @Published var brightnessSupported: Bool = true
     @Published var contrastSupported: Bool = true
     @Published var volumeSupported: Bool = true
-    @Published var inputSupported: Bool = true
 
     @Published var isReachable: Bool = false
     @Published var lastError: String? = nil
@@ -63,7 +29,6 @@ final class DisplayController: ObservableObject, Identifiable {
         self.id = display.uuid
         self.displayName = display.productName
         self.manufacturer = display.manufacturer
-        self.useAltInput = display.isLG
     }
 
     func refresh() async {
@@ -165,20 +130,6 @@ final class DisplayController: ObservableObject, Identifiable {
             guard let self else { return }
             do { try await DDC.setMute(self.id, target) }
             catch { self.report(error) }
-        }
-    }
-
-    func setInput(_ input: InputSource) {
-        currentInput = input
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                if self.useAltInput {
-                    try await DDC.setInputAlt(self.id, input.altCode)
-                } else {
-                    try await DDC.setInput(self.id, input.rawValue)
-                }
-            } catch { self.report(error) }
         }
     }
 
