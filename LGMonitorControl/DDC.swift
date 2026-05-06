@@ -14,48 +14,92 @@ enum DDCError: Error, LocalizedError {
     }
 }
 
+struct Display: Identifiable, Hashable, Sendable {
+    let uuid: String
+    let productName: String
+    let manufacturer: String   // PNP ID, e.g. "GSM" (LG), "DEL" (Dell), "SAM" (Samsung)
+    var id: String { uuid }
+    var isLG: Bool { manufacturer.uppercased() == "GSM" }
+}
+
 actor DDC {
     static let shared = DDC()
     static let binaryPath = "/opt/homebrew/bin/m1ddc"
 
-    private var cachedUUID: String?
+    private var cachedDisplays: [Display]?
 
     static var isInstalled: Bool {
         FileManager.default.isExecutableFile(atPath: binaryPath)
     }
 
-    private func resolveDisplay() async throws -> String {
-        if let cached = cachedUUID { return cached }
-        let listing = try await Self.runRaw(["display", "list"])
-        // Lines look like: "[2] LG ULTRAFINE (8C9D6B0B-D75A-406E-0857-D6964E3302DB)"
-        for line in listing.split(separator: "\n") {
-            let s = String(line)
-            let upper = s.uppercased()
-            guard upper.contains("LG") else { continue }
-            guard let open = s.lastIndex(of: "("),
-                  let close = s.lastIndex(of: ")"),
-                  open < close else { continue }
-            let uuid = String(s[s.index(after: open)..<close])
-            cachedUUID = uuid
-            return uuid
-        }
-        throw DDCError.nonZeroExit(code: -1, stderr: "No LG display found in:\n\(listing)")
+    func invalidate() { cachedDisplays = nil }
+
+    func listDisplays() async throws -> [Display] {
+        if let cached = cachedDisplays { return cached }
+        let listing = try await Self.runRaw(["display", "list", "detailed"])
+        let parsed = Self.parseDisplayList(listing)
+        cachedDisplays = parsed
+        return parsed
     }
 
-    func invalidate() { cachedUUID = nil }
+    /// Parses `m1ddc display list detailed` output. Skips built-in / unsupported
+    /// displays (Apple's manufacturer code "00-10-fa" or null product name).
+    static func parseDisplayList(_ raw: String) -> [Display] {
+        var results: [Display] = []
+        var currentUUID: String?
+        var currentName: String?
+        var currentManufacturer: String?
 
-    @discardableResult
-    func run(_ args: [String]) async throws -> String {
-        guard Self.isInstalled else { throw DDCError.binaryMissing }
-        let uuid = try await resolveDisplay()
-        do {
-            return try await Self.runRaw(["display", uuid] + args)
-        } catch {
-            // UUID may have changed (reboot, replug) — invalidate and retry once.
-            cachedUUID = nil
-            let fresh = try await resolveDisplay()
-            return try await Self.runRaw(["display", fresh] + args)
+        func flush() {
+            defer {
+                currentUUID = nil
+                currentName = nil
+                currentManufacturer = nil
+            }
+            guard let uuid = currentUUID,
+                  let name = currentName,
+                  let mfg = currentManufacturer else { return }
+            // Skip Apple built-in / unsupported displays.
+            if name == "(null)" { return }
+            if mfg.lowercased() == "00-10-fa" { return }
+            results.append(Display(uuid: uuid, productName: name, manufacturer: mfg))
         }
+
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            let s = String(line)
+            if s.hasPrefix("[") {
+                // New display block — flush the previous one.
+                flush()
+                // "[2] LG ULTRAFINE (8C9D6B0B-D75A-...)"
+                if let close = s.firstIndex(of: "]") {
+                    let after = s.index(after: close)
+                    let rest = s[after...].trimmingCharacters(in: .whitespaces)
+                    if let openParen = rest.lastIndex(of: "("),
+                       let closeParen = rest.lastIndex(of: ")"),
+                       openParen < closeParen {
+                        currentUUID = String(rest[rest.index(after: openParen)..<closeParen])
+                        let name = rest[..<openParen].trimmingCharacters(in: .whitespaces)
+                        currentName = name.isEmpty ? "(null)" : name
+                    }
+                }
+            } else {
+                let trimmed = s.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("- Manufacturer:") {
+                    currentManufacturer = trimmed
+                        .replacingOccurrences(of: "- Manufacturer:", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+        flush()
+        return results
+    }
+
+    /// Runs an m1ddc command targeting a specific display UUID.
+    @discardableResult
+    func run(_ uuid: String, _ args: [String]) async throws -> String {
+        guard Self.isInstalled else { throw DDCError.binaryMissing }
+        return try await Self.runRaw(["display", uuid] + args)
     }
 
     // DDC/CI is a serial bus. Concurrent m1ddc invocations collide and corrupt
@@ -92,23 +136,38 @@ actor DDC {
         }
     }
 
-    static func getInt(_ property: String) async throws -> Int {
-        let raw = try await shared.run(["get", property])
+    static func getInt(_ uuid: String, _ property: String) async throws -> Int {
+        let raw = try await shared.run(uuid, ["get", property])
         guard let value = Int(raw) else {
             throw DDCError.nonZeroExit(code: -1, stderr: "unparseable: \(raw)")
         }
         return value
     }
 
-    static func set(_ property: String, _ value: Int) async throws {
-        try await shared.run(["set", property, String(value)])
+    /// Returns `nil` when the display does not support reading the max for the
+    /// given property (m1ddc errors out or returns a non-integer).
+    static func maxInt(_ uuid: String, _ property: String) async -> Int? {
+        do {
+            let raw = try await shared.run(uuid, ["max", property])
+            return Int(raw)
+        } catch {
+            return nil
+        }
     }
 
-    static func setInputAlt(_ code: Int) async throws {
-        try await shared.run(["set", "input-alt", String(code)])
+    static func set(_ uuid: String, _ property: String, _ value: Int) async throws {
+        try await shared.run(uuid, ["set", property, String(value)])
     }
 
-    static func setMute(_ on: Bool) async throws {
-        try await shared.run(["set", "mute", on ? "on" : "off"])
+    static func setInput(_ uuid: String, _ code: Int) async throws {
+        try await shared.run(uuid, ["set", "input", String(code)])
+    }
+
+    static func setInputAlt(_ uuid: String, _ code: Int) async throws {
+        try await shared.run(uuid, ["set", "input-alt", String(code)])
+    }
+
+    static func setMute(_ uuid: String, _ on: Bool) async throws {
+        try await shared.run(uuid, ["set", "mute", on ? "on" : "off"])
     }
 }

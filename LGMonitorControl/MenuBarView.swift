@@ -2,101 +2,63 @@ import SwiftUI
 import ServiceManagement
 
 struct MenuBarView: View {
-    @EnvironmentObject var controller: MonitorController
+    @EnvironmentObject var manager: MonitorManager
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().background(Color.claudeBorder)
-
-            if !controller.isInstalled {
+            if !manager.isInstalled {
                 installPrompt
-            } else if !controller.isReachable {
-                unreachable
+            } else if manager.displays.isEmpty {
+                emptyState
             } else {
-                controls
+                monitorPicker
+                Divider().background(Color.claudeBorder)
+                if let controller = manager.selectedController {
+                    DisplayControlsView(controller: controller)
+                        .id(controller.id)   // ensure subview re-evaluates per-display
+                }
             }
 
             Divider().background(Color.claudeBorder)
             footer
         }
-        .frame(width: 300)
+        .frame(width: 320)
         .background(Color.claudeCream)
-        .task { await controller.refresh() }
+        .task { await manager.discover() }
     }
 
-    private var header: some View {
+    private var monitorPicker: some View {
         HStack(spacing: 8) {
             Image(systemName: "display")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color.claudeAccent)
-            Text("LG 27UP850-W")
-                .font(.system(.headline, design: .rounded))
+            Text("Monitor")
+                .font(.system(.callout, design: .rounded).weight(.medium))
                 .foregroundStyle(Color.claudeText)
+            Picker("", selection: Binding(
+                get: { manager.selectedID ?? manager.displays.first?.id ?? "" },
+                set: { newID in
+                    manager.select(newID)
+                    if let c = manager.selectedController { Task { await c.refresh() } }
+                }
+            )) {
+                ForEach(manager.displays) { display in
+                    Text(display.displayName).tag(display.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .tint(Color.claudeAccent)
             Spacer()
             Circle()
-                .fill(controller.isReachable ? Color.green : Color.gray.opacity(0.5))
+                .fill((manager.selectedController?.isReachable ?? false)
+                      ? Color.green
+                      : Color.gray.opacity(0.5))
                 .frame(width: 8, height: 8)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private var controls: some View {
-        VStack(spacing: 16) {
-            ThemedSlider(
-                title: "Brightness",
-                systemImage: "sun.max.fill",
-                value: $controller.brightness,
-                onCommit: { controller.commitBrightness() }
-            )
-            ThemedSlider(
-                title: "Contrast",
-                systemImage: "circle.lefthalf.filled",
-                value: $controller.contrast,
-                onCommit: { controller.commitContrast() }
-            )
-            HStack(spacing: 8) {
-                Button {
-                    controller.toggleMute()
-                } label: {
-                    Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(controller.muted ? Color.claudeAccent : Color.claudeSecondary)
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help(controller.muted ? "Unmute" : "Mute")
-                ThemedSlider(
-                    title: "Volume",
-                    systemImage: "speaker.wave.2.fill",
-                    value: $controller.volume,
-                    onCommit: { controller.commitVolume() }
-                )
-            }
-
-            HStack {
-                Text("Input")
-                    .font(.system(.callout, design: .rounded).weight(.medium))
-                    .foregroundStyle(Color.claudeText)
-                Spacer()
-                Picker("", selection: Binding(
-                    get: { controller.currentInput ?? .usbC },
-                    set: { controller.setInput($0) }
-                )) {
-                    ForEach(InputSource.allCases) { source in
-                        Text(source.label).tag(source)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .tint(Color.claudeAccent)
-                .frame(width: 140)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
     }
 
     private var installPrompt: some View {
@@ -120,22 +82,21 @@ struct MenuBarView: View {
         .padding(.horizontal, 16).padding(.vertical, 18)
     }
 
-    private var unreachable: some View {
+    private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "display.trianglebadge.exclamationmark")
+            Image(systemName: "display.slash")
                 .font(.system(size: 22))
                 .foregroundStyle(Color.claudeSecondary)
-            Text("Monitor not reachable")
+            Text("No external displays detected")
                 .font(.system(.callout, design: .rounded).weight(.semibold))
                 .foregroundStyle(Color.claudeText)
-            if let err = controller.lastError {
-                Text(err)
-                    .font(.caption2)
-                    .foregroundStyle(Color.claudeSecondary)
-                    .multilineTextAlignment(.center)
-            }
-            Button("Retry") {
-                Task { await controller.refresh() }
+            Text("m1ddc cannot control built-in panels or the HDMI port on entry M1/M2 Macs.")
+                .font(.caption2)
+                .foregroundStyle(Color.claudeSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+            Button("Rescan") {
+                Task { await manager.discover() }
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.claudeAccent)
@@ -174,5 +135,106 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+}
+
+private struct DisplayControlsView: View {
+    @ObservedObject var controller: DisplayController
+
+    var body: some View {
+        Group {
+            if controller.isReachable {
+                controls
+            } else {
+                unreachable
+            }
+        }
+        .task { await controller.refresh() }
+    }
+
+    private var controls: some View {
+        VStack(spacing: 16) {
+            ThemedSlider(
+                title: "Brightness",
+                systemImage: "sun.max.fill",
+                value: $controller.brightness,
+                onCommit: { controller.commitBrightness() }
+            )
+            .disabled(!controller.brightnessSupported)
+
+            ThemedSlider(
+                title: "Contrast",
+                systemImage: "circle.lefthalf.filled",
+                value: $controller.contrast,
+                onCommit: { controller.commitContrast() }
+            )
+            .disabled(!controller.contrastSupported)
+
+            HStack(spacing: 8) {
+                Button {
+                    controller.toggleMute()
+                } label: {
+                    Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(controller.muted ? Color.claudeAccent : Color.claudeSecondary)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(!controller.volumeSupported)
+                .help(controller.muted ? "Unmute" : "Mute")
+                ThemedSlider(
+                    title: "Volume",
+                    systemImage: "speaker.wave.2.fill",
+                    value: $controller.volume,
+                    onCommit: { controller.commitVolume() }
+                )
+                .disabled(!controller.volumeSupported)
+            }
+
+            HStack {
+                Text("Input")
+                    .font(.system(.callout, design: .rounded).weight(.medium))
+                    .foregroundStyle(Color.claudeText)
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { controller.currentInput ?? .usbC },
+                    set: { controller.setInput($0) }
+                )) {
+                    ForEach(InputSource.allCases) { source in
+                        Text(source.label).tag(source)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(Color.claudeAccent)
+                .frame(width: 140)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private var unreachable: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "display.trianglebadge.exclamationmark")
+                .font(.system(size: 22))
+                .foregroundStyle(Color.claudeSecondary)
+            Text("Display not reachable")
+                .font(.system(.callout, design: .rounded).weight(.semibold))
+                .foregroundStyle(Color.claudeText)
+            if let err = controller.lastError {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(Color.claudeSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button("Retry") {
+                Task { await controller.refresh() }
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.claudeAccent)
+            .font(.system(.caption, design: .rounded).weight(.semibold))
+        }
+        .padding(.horizontal, 16).padding(.vertical, 18)
     }
 }

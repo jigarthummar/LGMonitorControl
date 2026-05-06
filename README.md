@@ -1,6 +1,10 @@
 # LGMonitorControl
 
-A small macOS menu bar app to control an LG 27UP850-W (and other DDC/CI monitors) from the system menu bar — brightness, contrast, volume, mute, and input source. Built because macOS doesn't expose these settings for third-party displays.
+A small macOS menu bar app to control any DDC/CI-capable external monitor — brightness, contrast, volume, mute, and input source — from the system menu bar. Built because macOS doesn't expose these settings for third-party displays.
+
+Supports multiple monitors at once: each detected display gets its own tab in the popover. Vendor-specific quirks (LG monitors use alternate VCP addressing for input switching) are handled automatically.
+
+The project name is historical — it began as a single-monitor LG controller and the package name stuck. It now works with any DDC/CI display.
 
 Under the hood it shells out to [m1ddc](https://github.com/waydabber/m1ddc), which speaks DDC/CI over USB-C / DisplayPort.
 
@@ -8,7 +12,7 @@ Under the hood it shells out to [m1ddc](https://github.com/waydabber/m1ddc), whi
 
 - Apple Silicon Mac (m1ddc does not support the built-in HDMI port on M1 / entry M2 Macs)
 - macOS 14 or later
-- A monitor connected via USB-C / Thunderbolt / DisplayPort that supports DDC/CI
+- One or more external monitors connected via USB-C / Thunderbolt / DisplayPort that support DDC/CI
 - [Homebrew](https://brew.sh)
 - Xcode 15+ (only for building from source)
 
@@ -43,37 +47,38 @@ A `display` icon will appear in the menu bar. The app has no Dock icon (`LSUIEle
 
 Click the menu bar icon to open the popover.
 
-- **Brightness / Contrast / Volume** — drag a slider, release to apply. The value is written to the monitor on release, not while dragging, to avoid spamming the DDC bus.
+- **Tabs** at the top — one per detected external monitor. Click a tab to switch which monitor's controls are shown. Built-in panels are filtered out (m1ddc can't control them).
+- **Brightness / Contrast / Volume** — drag a slider, release to apply. Writes happen on release, not while dragging, to avoid spamming the DDC bus. If a monitor doesn't support a control, the slider renders disabled and labeled "not supported".
 - **Mute** — speaker icon next to the volume slider.
-- **Input** — switch between HDMI 1, HDMI 2, DisplayPort 1/2, USB-C. Uses m1ddc's `input-alt` codes (LG monitors use alternate addressing).
+- **Input** — switch between HDMI 1, HDMI 2, DisplayPort 1/2, USB-C. The app dispatches via standard or alternate VCP addressing depending on the monitor's vendor.
 - **Launch at login** — registers the app via `SMAppService`.
 - **Quit** — exits the app.
 
-The status dot in the header is green when the monitor is reachable over DDC, gray when not. If the monitor goes away (sleep, unplug), click Retry on the popover.
+The status dot in the per-display header is green when the monitor is reachable over DDC, gray when not. The selected tab is remembered across launches.
 
-## Customizing for a different monitor
+## How it detects monitors
 
-The app finds your display by scanning `m1ddc display list` for an entry whose name contains "LG". To target a different monitor:
+At launch (and whenever displays are added or removed), the app runs `m1ddc display list detailed` and parses the output. Each entry's manufacturer code is read from the `- Manufacturer:` line:
 
-- Open `LGMonitorControl/DDC.swift`
-- In `resolveDisplay()`, change the `upper.contains("LG")` check to match your display's name from `m1ddc display list`.
-- Optionally update the header label in `LGMonitorControl/MenuBarView.swift` (`Text("LG 27UP850-W")`).
+- Entries with name `(null)` or manufacturer `00-10-fa` (Apple's PNP ID) are skipped — they are built-in panels that m1ddc can't drive.
+- Entries with manufacturer `GSM` (LG) are flagged for alternate input-switch addressing.
+- All other vendors use standard VCP input codes (HDMI 1=17, HDMI 2=18, DP 1=15, DP 2=16, USB-C=27).
 
-For non-LG monitors that don't use alternate input addressing, change `setInputAlt` to `set input` in `DDC.swift`, and adjust the `InputSource` enum raw values in `MonitorController.swift` to standard codes (HDMI 1 = 17, HDMI 2 = 18, DisplayPort 1 = 15, DisplayPort 2 = 16, USB-C = 27).
+If a vendor-detection heuristic misses your monitor and input switching doesn't work, please open an issue with the output of `m1ddc display list detailed`.
 
 ## Troubleshooting
 
 **Popover shows "m1ddc is not installed"**
 Run `brew install m1ddc`. The app expects the binary at `/opt/homebrew/bin/m1ddc`.
 
-**"Monitor not reachable"**
-Run `m1ddc display list` in Terminal — your monitor should appear. If it doesn't, m1ddc can't see it (HDMI port limitation on entry-level Apple Silicon, or the monitor doesn't support DDC/CI). If it does appear but the name doesn't contain "LG", see *Customizing for a different monitor* above.
+**"No external displays detected"**
+Run `m1ddc display list` in Terminal — your monitor should appear there. If it doesn't, m1ddc can't see it (built-in HDMI port limitation on entry-level Apple Silicon, or the monitor doesn't support DDC/CI).
 
-**Values look wrong / change randomly**
-Make sure you're on the latest commit. Earlier revisions had a bug where concurrent `m1ddc` calls collided on the DDC serial bus and returned each other's responses. Fixed in `291560e`.
+**A control is greyed out and says "not supported"**
+The monitor reported `0` for that property's max value over DDC, meaning it doesn't expose that control. Common cases: monitors without speakers (volume disabled), some KVM-equipped monitors that lock contrast, etc.
 
-**Sliders snap on click instead of where I dragged**
-Same — update to the latest commit (`ad140bf`). The original used a custom slider with `DragGesture(minimumDistance: 0)` which interpreted clicks as drag-to-cursor.
+**Input switching doesn't change the input**
+The app guesses LG's alt addressing by manufacturer code `GSM`. If you have an LG monitor that reports a different code, or a non-LG monitor that nonetheless uses alt addressing, the dispatch will be wrong. Open an issue and include `m1ddc display list detailed`.
 
 ## Uninstall
 
@@ -93,8 +98,9 @@ rm -rf ~/Library/Caches/com.jigarthummar.LGMonitorControl
 ## Project layout
 
 - `LGMonitorControl/LGMonitorControlApp.swift` — `MenuBarExtra` entry point
-- `LGMonitorControl/MenuBarView.swift` — the popover UI
-- `LGMonitorControl/MonitorController.swift` — observable state, debounced writes, hot-plug handling
-- `LGMonitorControl/DDC.swift` — m1ddc subprocess wrapper, serialized on a single dispatch queue
-- `LGMonitorControl/Theme.swift` — Claude-inspired warm palette and themed slider row
-- `project.yml` — xcodegen project spec; regenerate the `.xcodeproj` after editing
+- `LGMonitorControl/MenuBarView.swift` — the popover UI: tab strip + per-display controls + footer
+- `LGMonitorControl/MonitorManager.swift` — discovers displays, owns the list of `DisplayController`s, persists the selected tab, listens for hot-plug events
+- `LGMonitorControl/DisplayController.swift` — per-display observable state, capability flags, debounced writes, vendor-aware input dispatch
+- `LGMonitorControl/DDC.swift` — m1ddc subprocess wrapper. All calls run on a single serial dispatch queue (DDC/CI is a serial bus and concurrent calls corrupt each other's responses). Includes the display-list parser and `Display` model.
+- `LGMonitorControl/Theme.swift` — Claude-inspired warm palette and a `ThemedSlider` row that respects `@Environment(\.isEnabled)` for the disabled state.
+- `project.yml` — xcodegen project spec; regenerate the `.xcodeproj` after editing with `xcodegen generate`.
