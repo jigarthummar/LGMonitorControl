@@ -10,6 +10,7 @@ final class MonitorManager: ObservableObject {
     @Published var lastDiscoveryError: String? = nil
 
     private static let selectedKey = "selectedDisplayID"
+    private let mediaKeys = MediaKeyMonitor()
 
     init() {
         selectedID = UserDefaults.standard.string(forKey: Self.selectedKey)
@@ -23,6 +24,13 @@ final class MonitorManager: ObservableObject {
                 await self?.discover()
             }
         }
+        mediaKeys.manager = self
+        mediaKeys.start()
+    }
+
+    deinit {
+        // mediaKeys.stop() — implicitly cleaned up; NSEvent monitor is weakly
+        // tied to our manager via [weak self] capture inside the handler.
     }
 
     var selectedController: DisplayController? {
