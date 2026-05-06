@@ -1,9 +1,11 @@
 import SwiftUI
 import ServiceManagement
+import ApplicationServices
 
 struct MenuBarView: View {
     @EnvironmentObject var manager: MonitorManager
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
+    @State private var accessibilityGranted: Bool = AXIsProcessTrusted()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,12 +22,42 @@ struct MenuBarView: View {
                 }
             }
 
+            if !accessibilityGranted && manager.isInstalled {
+                Divider().background(Color.claudeBorder)
+                accessibilityHint
+            }
+
             Divider().background(Color.claudeBorder)
             footer
         }
         .frame(width: 320)
         .background(Color.claudeCream)
-        .task { await manager.discover() }
+        .task {
+            accessibilityGranted = AXIsProcessTrusted()
+            await manager.discover()
+        }
+    }
+
+    private var accessibilityHint: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "keyboard")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.claudeAccent)
+            Text("Grant Accessibility for keyboard shortcuts")
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.claudeSecondary)
+            Spacer()
+            Button("Open Settings") {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.system(.caption2, design: .rounded).weight(.semibold))
+            .foregroundStyle(Color.claudeAccent)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     private var monitorPicker: some View {
