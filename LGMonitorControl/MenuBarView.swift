@@ -12,7 +12,7 @@ struct MenuBarView: View {
             } else if manager.displays.isEmpty {
                 emptyState
             } else {
-                tabStrip
+                monitorPicker
                 Divider().background(Color.claudeBorder)
                 if let controller = manager.selectedController {
                     DisplayControlsView(controller: controller)
@@ -28,37 +28,37 @@ struct MenuBarView: View {
         .task { await manager.discover() }
     }
 
-    private var tabStrip: some View {
-        HStack(spacing: 6) {
-            ForEach(manager.displays) { display in
-                let isSelected = display.id == manager.selectedID
-                Button {
-                    manager.select(display.id)
-                    Task { await display.refresh() }
-                } label: {
-                    Text(shortLabel(for: display))
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(isSelected ? Color.white : Color.claudeText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(isSelected ? Color.claudeAccent : Color.claudeSurface)
-                        )
+    private var monitorPicker: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "display")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.claudeAccent)
+            Text("Monitor")
+                .font(.system(.callout, design: .rounded).weight(.medium))
+                .foregroundStyle(Color.claudeText)
+            Picker("", selection: Binding(
+                get: { manager.selectedID ?? manager.displays.first?.id ?? "" },
+                set: { newID in
+                    manager.select(newID)
+                    if let c = manager.selectedController { Task { await c.refresh() } }
                 }
-                .buttonStyle(.plain)
+            )) {
+                ForEach(manager.displays) { display in
+                    Text(display.displayName).tag(display.id)
+                }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .tint(Color.claudeAccent)
             Spacer()
+            Circle()
+                .fill((manager.selectedController?.isReachable ?? false)
+                      ? Color.green
+                      : Color.gray.opacity(0.5))
+                .frame(width: 8, height: 8)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-    }
-
-    private func shortLabel(for d: DisplayController) -> String {
-        // Truncate to keep the tab strip compact while still disambiguating
-        // e.g. two monitors of the same family ("LG ULTRAFINE" vs "LG 27UP850W").
-        let name = d.displayName
-        return name.count > 14 ? String(name.prefix(13)) + "\u{2026}" : name
     }
 
     private var installPrompt: some View {
@@ -142,8 +142,7 @@ private struct DisplayControlsView: View {
     @ObservedObject var controller: DisplayController
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        Group {
             if controller.isReachable {
                 controls
             } else {
@@ -151,25 +150,6 @@ private struct DisplayControlsView: View {
             }
         }
         .task { await controller.refresh() }
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "display")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.claudeAccent)
-            Text(controller.displayName)
-                .font(.system(.headline, design: .rounded))
-                .foregroundStyle(Color.claudeText)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer()
-            Circle()
-                .fill(controller.isReachable ? Color.green : Color.gray.opacity(0.5))
-                .frame(width: 8, height: 8)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
     }
 
     private var controls: some View {
