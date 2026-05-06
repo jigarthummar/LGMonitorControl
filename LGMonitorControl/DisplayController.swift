@@ -20,9 +20,16 @@ final class DisplayController: ObservableObject, Identifiable {
     @Published var isReachable: Bool = false
     @Published var lastError: String? = nil
 
-    private var brightnessTask: Task<Void, Never>? = nil
-    private var contrastTask: Task<Void, Never>? = nil
-    private var volumeTask: Task<Void, Never>? = nil
+    // Coalescing dispatcher state. Each property keeps the latest target value
+    // the user has dragged to, plus a flag indicating whether a write loop is
+    // currently running. This lets us track the slider live without queueing
+    // intermediate values behind the slow DDC bus.
+    private var pendingBrightness: Double? = nil
+    private var brightnessWriting = false
+    private var pendingContrast: Double? = nil
+    private var contrastWriting = false
+    private var pendingVolume: Double? = nil
+    private var volumeWriting = false
     private var suppressWrites = false
 
     init(display: Display) {
@@ -83,42 +90,52 @@ final class DisplayController: ObservableObject, Identifiable {
 
     func commitBrightness() {
         guard !suppressWrites, brightnessSupported else { return }
-        brightnessTask?.cancel()
-        let value = Int(brightness.rounded())
-        brightnessTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
-            if Task.isCancelled { return }
+        pendingBrightness = brightness
+        if brightnessWriting { return }
+        brightnessWriting = true
+        Task { [weak self] in
             guard let self else { return }
-            do { try await DDC.set(self.id, "luminance", value) }
-            catch { self.report(error) }
+            while let v = self.pendingBrightness {
+                self.pendingBrightness = nil
+                do { try await DDC.set(self.id, "luminance", Int(v.rounded())) }
+                catch { self.report(error); break }
+            }
+            self.brightnessWriting = false
         }
     }
 
     func commitContrast() {
         guard !suppressWrites, contrastSupported else { return }
-        contrastTask?.cancel()
-        let value = Int(contrast.rounded())
-        contrastTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
-            if Task.isCancelled { return }
+        pendingContrast = contrast
+        if contrastWriting { return }
+        contrastWriting = true
+        Task { [weak self] in
             guard let self else { return }
-            do { try await DDC.set(self.id, "contrast", value) }
-            catch { self.report(error) }
+            while let v = self.pendingContrast {
+                self.pendingContrast = nil
+                do { try await DDC.set(self.id, "contrast", Int(v.rounded())) }
+                catch { self.report(error); break }
+            }
+            self.contrastWriting = false
         }
     }
 
     func commitVolume() {
         guard !suppressWrites, volumeSupported else { return }
-        volumeTask?.cancel()
-        let value = Int(volume.rounded())
-        volumeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
-            if Task.isCancelled { return }
+        pendingVolume = volume
+        if volumeWriting { return }
+        volumeWriting = true
+        Task { [weak self] in
             guard let self else { return }
-            do {
-                try await DDC.set(self.id, "volume", value)
-                if value > 0, self.muted { self.muted = false }
-            } catch { self.report(error) }
+            while let v = self.pendingVolume {
+                self.pendingVolume = nil
+                let intValue = Int(v.rounded())
+                do {
+                    try await DDC.set(self.id, "volume", intValue)
+                    if intValue > 0, self.muted { self.muted = false }
+                } catch { self.report(error); break }
+            }
+            self.volumeWriting = false
         }
     }
 
