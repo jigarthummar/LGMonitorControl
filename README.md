@@ -47,12 +47,12 @@ A `display` icon will appear in the menu bar. The app has no Dock icon (`LSUIEle
 
 Click the menu bar icon to open the popover.
 
-- **Tabs** at the top — one per detected external monitor. Click a tab to switch which monitor's controls are shown. Built-in panels are filtered out (m1ddc can't control them).
-- **Brightness / Contrast / Volume** — drag a slider, release to apply. Writes happen on release, not while dragging, to avoid spamming the DDC bus. If a monitor doesn't support a control, the slider renders disabled and labeled "not supported".
-- **Mute** — speaker icon next to the volume slider.
-- **Input** — switch between HDMI 1, HDMI 2, DisplayPort 1/2, USB-C. The app dispatches via standard or alternate VCP addressing depending on the monitor's vendor.
+- **Monitor dropdown** at the top — one entry per detected external monitor. Built-in panels are filtered out (m1ddc can't control them). Selection is persisted across launches.
+- **Brightness / Contrast / Volume** — drag a slider; the monitor tracks live in ~100 ms. If a monitor doesn't support a control over DDC, the slider renders disabled and labeled "not supported".
+- **Mute** — tap the speaker icon on the Volume row to toggle.
+- **Volume keys (F10 / F11 / F12)** — global hotkeys that adjust the *currently selected* monitor's DDC volume even when another app is frontmost (F10 mute, F11 down, F12 up). On first launch, macOS will prompt for **Accessibility** permission — grant it in **System Settings → Privacy & Security → Accessibility**. Until then, the popover sliders work but the keys are inert; the popover footer shows a one-tap link to the right Settings pane.
 - **Launch at login** — registers the app via `SMAppService`.
-- **Quit** — exits the app.
+- **Quit** — exits the app. Quitting also restores normal OS behavior for the volume keys.
 
 The status dot in the per-display header is green when the monitor is reachable over DDC, gray when not. The selected tab is remembered across launches.
 
