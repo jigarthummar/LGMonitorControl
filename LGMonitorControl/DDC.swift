@@ -19,7 +19,6 @@ struct Display: Identifiable, Hashable, Sendable {
     let productName: String
     let manufacturer: String   // PNP ID, e.g. "GSM" (LG), "DEL" (Dell), "SAM" (Samsung)
     var id: String { uuid }
-    var isLG: Bool { manufacturer.uppercased() == "GSM" }
 }
 
 actor DDC {
@@ -157,14 +156,6 @@ actor DDC {
 
     static func set(_ uuid: String, _ property: String, _ value: Int) async throws {
         try await shared.run(uuid, ["set", property, String(value)])
-    }
-
-    static func setInput(_ uuid: String, _ code: Int) async throws {
-        try await shared.run(uuid, ["set", "input", String(code)])
-    }
-
-    static func setInputAlt(_ uuid: String, _ code: Int) async throws {
-        try await shared.run(uuid, ["set", "input-alt", String(code)])
     }
 
     static func setMute(_ uuid: String, _ on: Bool) async throws {

@@ -15,13 +15,23 @@ struct ThemedSlider: View {
     @Binding var value: Double
     let onCommit: () -> Void
     var range: ClosedRange<Double> = 0...100
+    var iconAction: (() -> Void)? = nil
 
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Image(systemName: systemImage)
+                Group {
+                    if let iconAction {
+                        Button(action: iconAction) {
+                            Image(systemName: systemImage)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Image(systemName: systemImage)
+                    }
+                }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(isEnabled ? Color.claudeSecondary : Color.claudeBorder)
                     .frame(width: 16)
