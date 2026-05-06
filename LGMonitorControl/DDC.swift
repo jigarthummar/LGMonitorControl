@@ -58,26 +58,38 @@ actor DDC {
         }
     }
 
+    // DDC/CI is a serial bus. Concurrent m1ddc invocations collide and corrupt
+    // each other's responses, so all subprocess calls are funneled through a
+    // single serial queue regardless of caller concurrency.
+    private static let serialQueue = DispatchQueue(label: "com.jigarthummar.LGMonitorControl.ddc")
+
     private static func runRaw(_ args: [String]) async throws -> String {
-        try await Task.detached(priority: .userInitiated) {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: binaryPath)
-            proc.arguments = args
-            let out = Pipe()
-            let err = Pipe()
-            proc.standardOutput = out
-            proc.standardError = err
-            try proc.run()
-            proc.waitUntilExit()
-            let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(),
-                                encoding: .utf8) ?? ""
-            if proc.terminationStatus != 0 {
-                let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(),
-                                    encoding: .utf8) ?? ""
-                throw DDCError.nonZeroExit(code: proc.terminationStatus, stderr: stderr)
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            serialQueue.async {
+                do {
+                    let proc = Process()
+                    proc.executableURL = URL(fileURLWithPath: binaryPath)
+                    proc.arguments = args
+                    let out = Pipe()
+                    let err = Pipe()
+                    proc.standardOutput = out
+                    proc.standardError = err
+                    try proc.run()
+                    proc.waitUntilExit()
+                    let stdout = String(data: out.fileHandleForReading.readDataToEndOfFile(),
+                                        encoding: .utf8) ?? ""
+                    if proc.terminationStatus != 0 {
+                        let stderr = String(data: err.fileHandleForReading.readDataToEndOfFile(),
+                                            encoding: .utf8) ?? ""
+                        cont.resume(throwing: DDCError.nonZeroExit(code: proc.terminationStatus, stderr: stderr))
+                        return
+                    }
+                    cont.resume(returning: stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+                } catch {
+                    cont.resume(throwing: error)
+                }
             }
-            return stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.value
+        }
     }
 
     static func getInt(_ property: String) async throws -> Int {
