@@ -1,5 +1,6 @@
 build/
 DerivedData/
+*.dmg
 *.xcodeproj/
 .DS_Store
 xcuserdata/
