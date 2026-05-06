@@ -55,6 +55,7 @@ struct ThemedSlider: View {
             })
             .tint(isEnabled ? Color.claudeAccent : Color.claudeBorder)
             .controlSize(.small)
+            .onChange(of: value) { _, _ in onCommit() }
         }
     }
 }
