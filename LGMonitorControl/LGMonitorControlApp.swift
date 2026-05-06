@@ -2,12 +2,12 @@ import SwiftUI
 
 @main
 struct LGMonitorControlApp: App {
-    @StateObject private var controller = MonitorController()
+    @StateObject private var manager = MonitorManager()
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
-                .environmentObject(controller)
+                .environmentObject(manager)
         } label: {
             Image(systemName: "display")
         }

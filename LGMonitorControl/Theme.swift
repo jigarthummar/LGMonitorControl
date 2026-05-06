@@ -16,26 +16,34 @@ struct ThemedSlider: View {
     let onCommit: () -> Void
     var range: ClosedRange<Double> = 0...100
 
+    @Environment(\.isEnabled) private var isEnabled
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.claudeSecondary)
+                    .foregroundStyle(isEnabled ? Color.claudeSecondary : Color.claudeBorder)
                     .frame(width: 16)
                 Text(title)
                     .font(.system(.callout, design: .rounded).weight(.medium))
-                    .foregroundStyle(Color.claudeText)
+                    .foregroundStyle(isEnabled ? Color.claudeText : Color.claudeSecondary.opacity(0.5))
                 Spacer()
-                Text("\(Int(value.rounded()))")
-                    .font(.system(.caption, design: .rounded).weight(.semibold))
-                    .foregroundStyle(Color.claudeSecondary)
-                    .monospacedDigit()
+                if isEnabled {
+                    Text("\(Int(value.rounded()))")
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(Color.claudeSecondary)
+                        .monospacedDigit()
+                } else {
+                    Text("not supported")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.claudeSecondary.opacity(0.6))
+                }
             }
             Slider(value: $value, in: range, onEditingChanged: { editing in
                 if !editing { onCommit() }
             })
-            .tint(Color.claudeAccent)
+            .tint(isEnabled ? Color.claudeAccent : Color.claudeBorder)
             .controlSize(.small)
         }
     }
