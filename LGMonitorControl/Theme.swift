@@ -16,10 +16,8 @@ struct ThemedSlider: View {
     let onCommit: () -> Void
     var range: ClosedRange<Double> = 0...100
 
-    @State private var isDragging = false
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.system(size: 12, weight: .medium))
@@ -34,55 +32,11 @@ struct ThemedSlider: View {
                     .foregroundStyle(Color.claudeSecondary)
                     .monospacedDigit()
             }
-            CustomSlider(value: $value, range: range, isDragging: $isDragging)
-                .frame(height: 18)
-                .onChange(of: value) { _, _ in
-                    onCommit()
-                }
-                .onChange(of: isDragging) { _, dragging in
-                    if !dragging { onCommit() }
-                }
-        }
-    }
-}
-
-struct CustomSlider: View {
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    @Binding var isDragging: Bool
-
-    var body: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            let pct = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
-            let fill = max(0, min(width, width * pct))
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.claudeBorder)
-                    .frame(height: 6)
-                Capsule()
-                    .fill(Color.claudeAccent)
-                    .frame(width: fill, height: 6)
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 16, height: 16)
-                    .overlay(Circle().stroke(Color.claudeAccent, lineWidth: 2))
-                    .shadow(color: Color.black.opacity(0.08), radius: 1, y: 1)
-                    .offset(x: fill - 8)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { g in
-                        isDragging = true
-                        let raw = max(0, min(width, g.location.x)) / width
-                        value = range.lowerBound + Double(raw) * (range.upperBound - range.lowerBound)
-                    }
-                    .onEnded { _ in
-                        isDragging = false
-                    }
-            )
+            Slider(value: $value, in: range, onEditingChanged: { editing in
+                if !editing { onCommit() }
+            })
+            .tint(Color.claudeAccent)
+            .controlSize(.small)
         }
     }
 }
